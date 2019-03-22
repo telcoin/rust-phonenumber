@@ -48,6 +48,19 @@ pub fn parse_with<S: AsRef<str>>(database: &Database, country: Option<country::I
 	// Normalize the number and extract country code.
 	number = helper::country_code(database, country, number)?;
 
+	// Switch country if it was detected in the previous step.
+	let mut country = country;
+	if let Some(country_code) = number.prefix.as_ref() {
+		if let Ok(country_code) = country_code.parse::<u16>() {
+			let regions = database.region(&country_code);
+			if let Some(regions) = regions {
+				if let Some(main_region) = regions.first() {
+					country = main_region.parse::<country::Id>().ok();
+				}
+			}
+		}
+	}
+
 	// Extract carrier and strip national prefix if present.
 	if let Some(meta) = country.and_then(|c| database.by_id(c.as_ref())) {
 		let mut potential = helper::national_number(meta, number.clone());
@@ -215,5 +228,46 @@ mod test {
 			extension: None,
 			carrier:   Some("12".into()),
 		}, parser::parse(Some(country::BR), "012 3121286979").unwrap());
+	}
+
+	#[test]
+	fn reload_country() {
+		let expected = PhoneNumber {
+			code: country::Code {
+				value:  44,
+				source: country::Source::Default,
+			},
+
+			national: NationalNumber {
+				value: 7511112222,
+				zeros: 0, // <=== this is the important part we want to test!
+			},
+
+			extension: None,
+			carrier:   None,
+		};
+		assert_eq!(expected, parser::parse(Some(country::GB), "7511112222").unwrap());
+		assert_eq!(expected, parser::parse(Some(country::GB), "07511112222").unwrap());
+
+		let expected = PhoneNumber {
+			code: country::Code {
+				value:  44,
+				source: country::Source::Plus,
+			},
+
+			national: NationalNumber {
+				value: 7511112222,
+				zeros: 0, // <=== this is the important part we want to test!
+			},
+
+			extension: None,
+			carrier:   None,
+		};
+		assert_eq!(expected, parser::parse(Some(country::GB), "+447511112222").unwrap());
+		assert_eq!(expected, parser::parse(Some(country::GB), "+4407511112222").unwrap());
+		assert_eq!(expected, parser::parse(Some(country::FR), "+447511112222").unwrap());
+		assert_eq!(expected, parser::parse(Some(country::FR), "+4407511112222").unwrap());
+		assert_eq!(expected, parser::parse(None, "+447511112222").unwrap());
+		assert_eq!(expected, parser::parse(None, "+4407511112222").unwrap());
 	}
 }
